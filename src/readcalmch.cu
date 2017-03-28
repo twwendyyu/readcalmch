@@ -54,6 +54,19 @@ void fprintf2DArray(float **data2D, unsigned *size_2D)
 	fclose(fptr);
 }
 
+float *covert2Dto1DArray (float **data2D, unsigned *size_2D)
+{
+	unsigned height = size_2D[0];
+	unsigned width = size_2D[1];
+
+	float *data1D = new float[height*width];
+	for (unsigned i = 0; i < height; ++i){
+		for (unsigned j = 0; j < width; ++j)
+			data1D[ i*width +j ] = data2D[i][j];
+	}
+	return data1D;
+}
+
 /**
  * CUDA kernel that computes reciprocal values for a given vector
  */
@@ -61,6 +74,28 @@ __global__ void reciprocalKernel(float *data, unsigned vectorSize) {
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
 	if (idx < vectorSize)
 		data[idx] = data[idx]+idx;
+}
+
+/**
+ * CUDA kernel that conduct reduction with some conditions
+ */
+__global__ void ifReductionKernel(float *data, unsigned vectorSize) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+	if (idx < vectorSize)
+		data[idx] = data[idx]+idx;
+}
+
+/**
+ * CUDA kernel that computes reflectance values for each photon
+ */
+__global__ void calRefPerPhotonKernel(float *data, float *result, unsigned height, unsigned width) {
+
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+	unsigned size = height*width;
+
+	if (idx < size){
+		result[idx] = data[idx]+idx;
+	}
 }
 
 /**
@@ -84,30 +119,50 @@ float *gpuReciprocal(float *data, unsigned size)
 }
 
 /**
- * Host function that copies the data and launches the work on GPU
+ * Host function that copies, reshape the data and launches the work on GPU
  */
-float *gpuCalReflectance(float *data, unsigned *size_2D)
+float *gpuRefPerDet(float **data2D, unsigned *size_2D)
 {
-	unsigned size = size_2D[0];
+	unsigned height = size_2D[0];
+	unsigned width  = size_2D[1];
+	unsigned size = height * width;
+	unsigned sizeOfgpuResult = size;
+
+	float *data = covert2Dto1DArray (data2D, size_2D);
+	fprintf1DArray(data, size);
+
 	float *rc = new float[size];
 	float *gpuData;
+	float *gpuResult;
 
+	/* gpuRefPerPhoton */
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuData, sizeof(float)*size));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuResult, sizeof(float)*sizeOfgpuResult));
 	CUDA_CHECK_RETURN(cudaMemcpy(gpuData, data, sizeof(float)*size, cudaMemcpyHostToDevice));
 
-	static const int BLOCK_SIZE = 256;
-	const int blockCount = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
-	reciprocalKernel<<<blockCount, BLOCK_SIZE>>> (gpuData, size);
+	static const int BLOCK_SIZE = 512;
+	int blockCount = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
+	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (gpuData, gpuResult, height, width);
 
-	CUDA_CHECK_RETURN(cudaMemcpy(rc, gpuData, sizeof(float)*size, cudaMemcpyDeviceToHost));
+	CUDA_CHECK_RETURN(cudaMemcpy(rc, gpuResult, sizeof(float)*sizeOfgpuResult, cudaMemcpyDeviceToHost));
+
 	CUDA_CHECK_RETURN(cudaFree(gpuData));
+
+	/* gpuRefPerDet */
+
+
+	//blockCount = (sizeOfgpuResult+BLOCK_SIZE-1)/BLOCK_SIZE;
+	//ifReductionKernel <<< blockCount, BLOCK_SIZE>>> ();
+
+	//CUDA_CHECK_RETURN(cudaFree(gpuResult));
+
 	return rc;
 }
 
 int main(void)
 {
 	/* 1D */
-	int WORK_SIZE = 100;
+	int WORK_SIZE = 128;
 	float *data = new float[WORK_SIZE];
 	initialize1DArray (data, WORK_SIZE);
 
@@ -116,8 +171,8 @@ int main(void)
 
 	/* 2D */
 	unsigned *WORK_SIZE_2D = new unsigned[2];
-	WORK_SIZE_2D[0] = 100; /* array height */
-	WORK_SIZE_2D[1] = 2;   /* array width */
+	WORK_SIZE_2D[0] = 32; /* array height */
+	WORK_SIZE_2D[1] = 4;   /* array width */
 
 	float **data2D = new float*[WORK_SIZE_2D[0]];
 	for(int i = 0; i < WORK_SIZE_2D[0]; ++i)
@@ -125,13 +180,13 @@ int main(void)
 	initialize2DArray (data2D, WORK_SIZE_2D);
 	fprintf2DArray (data2D, WORK_SIZE_2D);
 
-	float *refPerDet = gpuCalReflectance(data, WORK_SIZE_2D);
+	float *refPerDet = gpuRefPerDet(data2D, WORK_SIZE_2D);
 
 
 
 	/* Sum up in host */
 	float gpuSum = std::accumulate (recGpu, recGpu+WORK_SIZE, 0.0);
-	float result = std::accumulate (refPerDet, refPerDet+WORK_SIZE, 0.0);
+	float result = std::accumulate (refPerDet, refPerDet+ WORK_SIZE_2D[0]*WORK_SIZE_2D[1], 0.0);
 
 	/* Verify the results */
 	std::cout<<"gpuSum = "<<gpuSum<<std::endl;
