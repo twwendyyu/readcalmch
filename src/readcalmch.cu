@@ -18,6 +18,8 @@
 
 static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t);
 #define CUDA_CHECK_RETURN(value) CheckCudaErrorAux(__FILE__,__LINE__, #value, value)
+#define BLOCK_SIZE 512
+
 
 typedef struct _MCHInfo {
 	char	fname_mch[30];
@@ -28,13 +30,14 @@ typedef struct _MCHInfo {
 	float 	unitmm, normalizer;
 	float 	na, n0, theta; 	// load from .inp
 	float 	*mua;			// load from .inp
+	unsigned int sizeOfRawData, sizeOfData, sizeOfResult;
 }MCHInfo;
 
 typedef struct _MCHData {
-	float *rawData;
-	unsigned int *detid;
-	float *weight;
-	float *result;
+	float *rawdata;			//array length: sizeOfRawData
+	unsigned int *detid;	//array length:	sizeOfData
+	float *weight;			//array length: sizeOfData
+	float *result;			//array length: sizeOfResult
 }MCHData;
 
 void initialize1DArray(float *data, unsigned size)
@@ -106,18 +109,7 @@ __global__ void ifReductionKernel(float *data, unsigned vectorSize) {
 		data[idx] = data[idx]+idx;
 }
 
-/**
- * CUDA kernel that computes reflectance values for each photon
- */
-__global__ void calRefPerPhotonKernel(float *data, float *result, unsigned height, unsigned width) {
 
-	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
-	unsigned size = height*width;
-
-	if (idx < size){
-		result[idx] = data[idx]+idx;
-	}
-}
 
 /**
  * Host function that copies the data and launches the work on GPU
@@ -130,7 +122,6 @@ float *gpuReciprocal(float *data, unsigned size)
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuData, sizeof(float)*size));
 	CUDA_CHECK_RETURN(cudaMemcpy(gpuData, data, sizeof(float)*size, cudaMemcpyHostToDevice));
 	
-	static const int BLOCK_SIZE = 256;
 	const int blockCount = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
 	reciprocalKernel<<<blockCount, BLOCK_SIZE>>> (gpuData, size);
 
@@ -139,39 +130,7 @@ float *gpuReciprocal(float *data, unsigned size)
 	return rc;
 }
 
-/**
- * Host function that copies, reshape the data and launches the work on GPU
- */
-float *gpuRefPerPhoton(float **data2D, unsigned *size_2D)
-{
-	unsigned height = size_2D[0];
-	unsigned width  = size_2D[1];
-	unsigned size = height * width;
-	unsigned sizeOfgpuResult = size;
 
-	float *data = covert2Dto1DArray (data2D, size_2D);
-	fprintf1DArray(data, size);
-
-	float *rc = new float[size];
-	float *gpuData;
-	float *gpuResult;
-
-	/* gpuRefPerPhoton */
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuData, sizeof(float)*size));
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuResult, sizeof(float)*sizeOfgpuResult));
-	CUDA_CHECK_RETURN(cudaMemcpy(gpuData, data, sizeof(float)*size, cudaMemcpyHostToDevice));
-
-	static const int BLOCK_SIZE = 512;
-	int blockCount = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
-	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (gpuData, gpuResult, height, width);
-
-	CUDA_CHECK_RETURN(cudaMemcpy(rc, gpuResult, sizeof(float)*sizeOfgpuResult, cudaMemcpyDeviceToHost));
-
-	CUDA_CHECK_RETURN(cudaFree(gpuData));
-	CUDA_CHECK_RETURN(cudaFree(gpuResult));
-
-	return rc;
-}
 void initloadpara(MCHInfo *info, MCHData *data){
 
 	FILE *fptr_mch, *fptr_inp;
@@ -203,16 +162,16 @@ void initloadpara(MCHInfo *info, MCHData *data){
 	fread(info->junk,sizeof(unsigned int),5,fptr_mch);				printf("junk\t\t%d%d%d%d%d\n",info->junk[0],info->junk[1],info->junk[2],info->junk[3],info->junk[4]);
 
 	//allocate memory
-	unsigned int sizeOfData = info->savedphoton;
-	data->detid = (unsigned int*) malloc (sizeof(unsigned int)*sizeOfData);
-	data->weight = (float*) malloc (sizeof(float)*sizeOfData);
+	info->sizeOfData = info->savedphoton;
+	data->detid = (unsigned int*) malloc (sizeof(unsigned int)*info->sizeOfData);
+	data->weight = (float*) malloc (sizeof(float)*info->sizeOfData);
 
-	unsigned int sizeOfResult = info->detnum;
-	data->result = (float*) malloc (sizeof(float)*sizeOfResult);
+	info->sizeOfResult = info->detnum;
+	data->result = (float*) malloc (sizeof(float)*info->sizeOfResult);
 
-	unsigned int sizeOfRawData = info->savedphoton*info->colcount;
-	data->rawData = (float*) malloc (sizeof(float)*sizeOfRawData);
-	fread(data->rawData ,sizeof(float), sizeOfRawData,fptr_mch); /* did not scaled back to 1 mm yet */
+	info->sizeOfRawData = info->savedphoton*info->colcount;
+	data->rawdata = (float*) malloc (sizeof(float)*info->sizeOfRawData);
+	fread(data->rawdata ,sizeof(float), info->sizeOfRawData,fptr_mch); /* did not scaled back to 1 mm yet */
 
 
 	// specify .inp fname
@@ -225,14 +184,14 @@ void initloadpara(MCHInfo *info, MCHData *data){
 	char junkc[50];
 	for (int i = 0; i < 10; ++i){
 		fgets(junkc, 50, fptr_inp); //discard from line 1 to 10
-		printf("%s\n",junkc);
+		//printf("%s\n",junkc);
 	}
 	unsigned int sizeOfMua = info->maxmedia;
 	double junkf1, junkf2, junkf3, junkf4;
 	info->mua = (float*) malloc (sizeof(float)*sizeOfMua);
 	for(int i = 0; i < sizeOfMua; ++i)
 	{
-		printf("line %d:",i);
+		printf("mua %d:",i);
 		fscanf(fptr_inp,"%lf %lf %lf %lf",&(junkf1), &(junkf2), &(junkf3), &(junkf4));
 		info->mua[i] = (float)junkf3; //casting double into float, and stored in mua[i]
 		printf("\t%e\n",info->mua[i]);
@@ -243,7 +202,49 @@ void initloadpara(MCHInfo *info, MCHData *data){
 	fclose(fptr_inp);
 
 }
+/**
+ * CUDA kernel that computes reflectance values for each photon
+ */
+__global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, unsigned int maxmedia, float *rawdata, float *detid, float *weight, float *mua, float unitmm, float theta) {
+
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x; //i.e. rowcount
+
+	if (idx < size){
+		detid[idx] = rawdata[idx*colcount];
+		weight[idx] = 0.0;
+
+		float temp = 0.0;
+		//if (acosf(abs(rawdata[(idx+1)*colcount-1])) <= theta){
+			for (unsigned int i = 0; i < maxmedia; ++i)
+				temp += (-1.0)*unitmm*mua[i]*rawdata[idx*colcount + (2+i)];
+			weight[idx] = __expf(temp);
+		//}
+	}
+}
 void calref_photon(MCHInfo *info,MCHData *data){
+
+	float *gRawdata, *gDetid, *gWeight, *gMua;
+
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gRawdata, sizeof(float)*info->sizeOfRawData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(float)*info->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*info->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gMua, sizeof(float)*info->maxmedia));
+
+	CUDA_CHECK_RETURN(cudaMemcpy(gRawdata, data->rawdata, sizeof(float)*info->sizeOfRawData, cudaMemcpyHostToDevice));
+	CUDA_CHECK_RETURN(cudaMemcpy(gMua, info->mua, sizeof(float)*info->maxmedia, cudaMemcpyHostToDevice));
+
+	unsigned int blockCount = (info->sizeOfData + BLOCK_SIZE-1)/BLOCK_SIZE;
+	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (info->sizeOfData, info->colcount, info->maxmedia, gRawdata, gDetid, gWeight, gMua, info->unitmm, info->theta);
+
+	CUDA_CHECK_RETURN(cudaMemcpy(data->detid, gDetid, sizeof(float)*info->sizeOfData, cudaMemcpyDeviceToHost));
+	CUDA_CHECK_RETURN(cudaMemcpy(data->weight, gWeight, sizeof(float)*info->sizeOfData, cudaMemcpyDeviceToHost));
+
+	fprintf1DArray(data->weight, info->sizeOfData);
+
+	CUDA_CHECK_RETURN(cudaFree(gRawdata));
+	CUDA_CHECK_RETURN(cudaFree(gDetid));
+	CUDA_CHECK_RETURN(cudaFree(gWeight));
+	CUDA_CHECK_RETURN(cudaFree(gMua));
 
 }
 
@@ -253,7 +254,7 @@ int main(void)
 	MCHData data;
 
 	initloadpara(&info,&data);
-	calref_photon(&info,&data);	// void calref_photon(MCHInfo *info, MCHData *data);//also partition rawData into detid, weight arrays //__host__ calRefPerPhotonKernel
+	calref_photon(&info,&data);	// void calref_photon(MCHInfo *info, MCHData *data);//also partition rawdata into detid, weight arrays //__host__ calRefPerPhotonKernel
 	//sortbykey(&info,&data);		// void sortbykey(MCHInfo *info, MCHData *data); 	//__host__ void thrust::sort_by_key
 	//calref_det(&info,&data);		// void calref(MCHInfo *info, MCHData *data);		//__host__ thrust::pair<float*,float*> thrust::reduce_by_key
 	//printresult(&info,&data);		// void printresult(MCHInfo *info, MCHData *data);
