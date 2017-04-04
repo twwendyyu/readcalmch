@@ -221,6 +221,32 @@ void sortbykey(MCHInfo *info, MCHData *data){
 	/*char f2[] = "weight_sorted.txt";
 	fprintf1DArray(f2, data->weight, info->sizeOfData);*/
 }
+void calref_det(MCHInfo *info, MCHData *data){
+
+	//copy values from pointer to static array
+	int keysIn[info->sizeOfData];
+	arraymapping_1d<int>(data->detid, keysIn, info->sizeOfData);
+
+	float valuesIn[info->sizeOfData];
+	arraymapping_1d<float>(data->weight, valuesIn, info->sizeOfData);
+
+	int keysOut[info->sizeOfResult];
+
+	float valuesOut[info->sizeOfResult];
+
+	//call main function
+	const int N = info->sizeOfData;
+	thrust::reduce_by_key(thrust::host, keysIn, keysIn + N, valuesIn, keysOut, valuesOut);
+
+	//copy values from static array to pointer
+	arraymapping_1d<float>(valuesOut, data->result, info->sizeOfResult);
+
+	char f1[] = "detid_sorted_reduced.txt";
+	fprintf1DArray(f1, keysOut, info->sizeOfResult);
+
+	char f2[] = "result.txt";
+	fprintf1DArray(f2, data->result, info->sizeOfResult);
+}
 int main(void)
 {
 	MCHInfo info;
@@ -229,7 +255,7 @@ int main(void)
 	initloadpara(&info,&data);
 	calref_photon(&info,&data);
 	sortbykey(&info,&data);
-	//calref_det(&info,&data);		// void calref(MCHInfo *info, MCHData *data);		//__host__ thrust::pair<float*,float*> thrust::reduce_by_key
+	calref_det(&info,&data);		//__host__ thrust::pair<float*,float*> thrust::reduce_by_key
 	//printresult(&info,&data);		// void printresult(MCHInfo *info, MCHData *data);
 
 	return 0;
