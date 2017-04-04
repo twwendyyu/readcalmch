@@ -53,7 +53,7 @@ void fprintf1DArray(char fname[], T *data, unsigned int size)
 	printf("Print to %s ...\n",fname);
 	FILE *fptr = fopen(fname,"w");
 	for (unsigned int i = 0; i < size; ++i)
-		fprintf(fptr,"[%d]\t%d\n",i,data[i]);
+		fprintf(fptr,"[%d]\t%f\n",i,data[i]);
 	fclose(fptr);
 }
 
