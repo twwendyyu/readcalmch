@@ -9,6 +9,7 @@
  */
 
 #include <iostream>
+#include <fstream>
 #include <numeric>
 #include <stdlib.h>
 #include <stdio.h>
@@ -35,10 +36,10 @@ typedef struct _MCHInfo {
 }MCHInfo;
 
 typedef struct _MCHData {
-	float *rawdata;			//array length: sizeOfRawData
-	int* detid;	//array length:	sizeOfData
-	float *weight;			//array length: sizeOfData
-	float *result;			//array length: sizeOfResult
+	float 	*rawdata;		//array length: sizeOfRawData
+	int		*detid;			//array length:	sizeOfData
+	float 	*weight;		//array length: sizeOfData
+	float 	*result;		//array length: sizeOfResult
 }MCHData;
 
 template <typename T>
@@ -51,26 +52,14 @@ template <typename T>
 void fprintf1DArray(char fname[], T *data, unsigned int size)
 {
 	printf("Print to %s ...\n",fname);
-	FILE *fptr = fopen(fname,"w");
+	ofstream myfile;
+
+	myfile.open(fname);
 	for (unsigned int i = 0; i < size; ++i)
-		fprintf(fptr,"[%d]\t%f\n",i,data[i]);
-	fclose(fptr);
+		myfile << "[" << i << "]\t" << data[i] << endl;
+
+	myfile.close();
 }
-
-
-float *covert2Dto1DArray (float **data2D, unsigned *size_2D)
-{
-	unsigned height = size_2D[0];
-	unsigned width = size_2D[1];
-
-	float *data1D = new float[height*width];
-	for (unsigned i = 0; i < height; ++i){
-		for (unsigned j = 0; j < width; ++j)
-			data1D[ i*width +j ] = data2D[i][j];
-	}
-	return data1D;
-}
-
 
 void initloadpara(MCHInfo *info, MCHData *data){
 
@@ -123,10 +112,9 @@ void initloadpara(MCHInfo *info, MCHData *data){
 	// load from fptr_inp
 	fptr_inp = fopen(info->fname_inp,"r");
 	char junkc[50];
-	for (int i = 0; i < 10; ++i){
+	for (int i = 0; i < 10; ++i)
 		fgets(junkc, 50, fptr_inp); //discard from line 1 to 10
-		//printf("%s\n",junkc);
-	}
+
 	unsigned int sizeOfMua = info->maxmedia;
 	double junkf1, junkf2, junkf3, junkf4;
 	info->mua = (float*) malloc (sizeof(float)*sizeOfMua);
@@ -155,11 +143,11 @@ __global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, 
 		weight[idx] = 0.0;
 
 		float temp = 0.0;
-		//if (acosf(abs(rawdata[(idx+1)*colcount-1])) <= theta){
+		if (acosf(abs(rawdata[(idx+1)*colcount-1])) <= theta){
 			for (unsigned int i = 0; i < maxmedia; ++i)
 				temp += (-1.0)*unitmm*mua[i]*rawdata[idx*colcount + (2+i)];
 			weight[idx] = __expf(temp);
-		//}
+		}
 	}
 }
 void calref_photon(MCHInfo *info,MCHData *data){
@@ -198,15 +186,6 @@ void sortbykey(MCHInfo *info, MCHData *data){
 	float values[info->sizeOfData];
 	arraymapping_1d<float>(data->weight, values, info->sizeOfData);
 
-	char f3[] = "detid.txt";
-	fprintf1DArray(f3, data->detid, info->sizeOfData);
-
-	char f5[] = "keys.txt";
-	fprintf1DArray(f5, keys, info->sizeOfData);
-
-	/*char f4[] = "weight.txt";
-	fprintf1DArray(f4, data->weight, info->sizeOfData);*/
-
 	//call main function
 	const int N = info->sizeOfData;
 	thrust::sort_by_key(thrust::host, keys, keys + N, values);
@@ -215,11 +194,7 @@ void sortbykey(MCHInfo *info, MCHData *data){
 	arraymapping_1d<int >(keys, data->detid, info->sizeOfData);
 	arraymapping_1d<float>(values, data->weight, info->sizeOfData);
 
-	char f1[] = "detid_sorted.txt";
-	fprintf1DArray(f1, data->detid, info->sizeOfData);
 
-	/*char f2[] = "weight_sorted.txt";
-	fprintf1DArray(f2, data->weight, info->sizeOfData);*/
 }
 void calref_det(MCHInfo *info, MCHData *data){
 
@@ -241,12 +216,44 @@ void calref_det(MCHInfo *info, MCHData *data){
 	//copy values from static array to pointer
 	arraymapping_1d<float>(valuesOut, data->result, info->sizeOfResult);
 
-	char f1[] = "detid_sorted_reduced.txt";
-	fprintf1DArray(f1, keysOut, info->sizeOfResult);
-
-	char f2[] = "result.txt";
-	fprintf1DArray(f2, data->result, info->sizeOfResult);
 }
+void printresult(MCHInfo *info, MCHData *data){
+
+	// print result
+	char f1[] = "result.txt";
+	fprintf1DArray(f1, data->result, info->sizeOfResult);
+
+	// print result./totalphoton
+	double temp[info->sizeOfResult];
+	for (unsigned i = 0; i < info->sizeOfResult; ++i)
+		temp[i] = data->result[i]/info->totalphoton;
+	char f2[] = "result_dividedTotalPhoton.txt";
+	fprintf1DArray(f2, temp, info->sizeOfResult);
+
+}
+void clearmch(MCHInfo *info, MCHData *data){
+	if(info->mua){
+		free(info->mua);
+		info->mua = NULL;
+	}
+	if(data->rawdata){
+		free(data->rawdata);
+		data->rawdata = NULL;
+	}
+	if(data->detid){
+		free(data->detid);
+		data->detid = NULL;
+	}
+	if(data->weight){
+		free(data->weight);
+		data->weight = NULL;
+	}
+	if(data->result){
+		free(data->result);
+		data->result = NULL;
+	}
+}
+
 int main(void)
 {
 	MCHInfo info;
@@ -255,8 +262,9 @@ int main(void)
 	initloadpara(&info,&data);
 	calref_photon(&info,&data);
 	sortbykey(&info,&data);
-	calref_det(&info,&data);		//__host__ thrust::pair<float*,float*> thrust::reduce_by_key
-	//printresult(&info,&data);		// void printresult(MCHInfo *info, MCHData *data);
+	calref_det(&info,&data);
+	printresult(&info,&data);
+	clearmch(&info,&data);
 
 	return 0;
 }
