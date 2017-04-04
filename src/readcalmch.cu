@@ -20,6 +20,7 @@ static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t
 #define CUDA_CHECK_RETURN(value) CheckCudaErrorAux(__FILE__,__LINE__, #value, value)
 #define BLOCK_SIZE 512
 
+using namespace std;
 
 typedef struct _MCHInfo {
 	char	fname_mch[30];
@@ -35,48 +36,27 @@ typedef struct _MCHInfo {
 
 typedef struct _MCHData {
 	float *rawdata;			//array length: sizeOfRawData
-	unsigned int *detid;	//array length:	sizeOfData
+	int* detid;	//array length:	sizeOfData
 	float *weight;			//array length: sizeOfData
 	float *result;			//array length: sizeOfResult
 }MCHData;
 
-void initialize1DArray(float *data, unsigned size)
-{
-	for (unsigned i = 0; i < size; ++i)
-		data[i] = 0.0;
+template <typename T>
+void arraymapping_1d(T *origin, T *copy, unsigned int size){
+	for (unsigned int i = 0; i < size; ++i)
+		copy[i] = origin[i];
 }
 
-void initialize2DArray(float **data2D, unsigned *size_2D)
+template <typename T>
+void fprintf1DArray(char fname[], T *data, unsigned int size)
 {
-	unsigned height = size_2D[0];
-	unsigned width = size_2D[1];
-
-	for (unsigned i = 0; i < height; ++i){
-		for (unsigned j = 0; j < width; ++j)
-			data2D[i][j] = 0.0;
-	}
-}
-
-void fprintf1DArray(float *data, unsigned size)
-{
-	FILE *fptr = fopen("1DArray.txt","w");
-	for (unsigned i = 0; i < size; ++i)
-		fprintf(fptr,"[%d]\t%f\n",i,data[i]);
+	printf("Print to %s ...\n",fname);
+	FILE *fptr = fopen(fname,"w");
+	for (unsigned int i = 0; i < size; ++i)
+		fprintf(fptr,"[%d]\t%d\n",i,data[i]);
 	fclose(fptr);
 }
 
-void fprintf2DArray(float **data2D, unsigned *size_2D)
-{
-	unsigned height = size_2D[0];
-	unsigned width = size_2D[1];
-
-	FILE *fptr = fopen("2DArray.txt","w");
-	for (unsigned i = 0; i < height; ++i){
-		for (unsigned j = 0; j < width; ++j)
-			fprintf(fptr,"[%d][%d]\t%f\n",i,j,data2D[i][j]);
-	}
-	fclose(fptr);
-}
 
 float *covert2Dto1DArray (float **data2D, unsigned *size_2D)
 {
@@ -89,45 +69,6 @@ float *covert2Dto1DArray (float **data2D, unsigned *size_2D)
 			data1D[ i*width +j ] = data2D[i][j];
 	}
 	return data1D;
-}
-
-/**
- * CUDA kernel that computes reciprocal values for a given vector
- */
-__global__ void reciprocalKernel(float *data, unsigned vectorSize) {
-	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
-	if (idx < vectorSize)
-		data[idx] = data[idx]+idx;
-}
-
-/**
- * CUDA kernel that conduct reduction with some conditions
- */
-__global__ void ifReductionKernel(float *data, unsigned vectorSize) {
-	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
-	if (idx < vectorSize)
-		data[idx] = data[idx]+idx;
-}
-
-
-
-/**
- * Host function that copies the data and launches the work on GPU
- */
-float *gpuReciprocal(float *data, unsigned size)
-{
-	float *rc = new float[size];
-	float *gpuData;
-
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gpuData, sizeof(float)*size));
-	CUDA_CHECK_RETURN(cudaMemcpy(gpuData, data, sizeof(float)*size, cudaMemcpyHostToDevice));
-	
-	const int blockCount = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
-	reciprocalKernel<<<blockCount, BLOCK_SIZE>>> (gpuData, size);
-
-	CUDA_CHECK_RETURN(cudaMemcpy(rc, gpuData, sizeof(float)*size, cudaMemcpyDeviceToHost));
-	CUDA_CHECK_RETURN(cudaFree(gpuData));
-	return rc;
 }
 
 
@@ -163,7 +104,7 @@ void initloadpara(MCHInfo *info, MCHData *data){
 
 	//allocate memory
 	info->sizeOfData = info->savedphoton;
-	data->detid = (unsigned int*) malloc (sizeof(unsigned int)*info->sizeOfData);
+	data->detid = (int*) malloc (sizeof(int)*info->sizeOfData);
 	data->weight = (float*) malloc (sizeof(float)*info->sizeOfData);
 
 	info->sizeOfResult = info->detnum;
@@ -205,12 +146,12 @@ void initloadpara(MCHInfo *info, MCHData *data){
 /**
  * CUDA kernel that computes reflectance values for each photon
  */
-__global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, unsigned int maxmedia, float *rawdata, float *detid, float *weight, float *mua, float unitmm, float theta) {
+__global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, unsigned int maxmedia, float *rawdata, int *detid, float *weight, float *mua, float unitmm, float theta) {
 
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x; //i.e. rowcount
 
 	if (idx < size){
-		detid[idx] = rawdata[idx*colcount];
+		detid[idx] = (int)rawdata[idx*colcount];
 		weight[idx] = 0.0;
 
 		float temp = 0.0;
@@ -223,10 +164,11 @@ __global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, 
 }
 void calref_photon(MCHInfo *info,MCHData *data){
 
-	float *gRawdata, *gDetid, *gWeight, *gMua;
+	float *gRawdata, *gWeight, *gMua;
+	int *gDetid;
 
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gRawdata, sizeof(float)*info->sizeOfRawData));
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(float)*info->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(int)*info->sizeOfData));
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*info->sizeOfData));
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gMua, sizeof(float)*info->maxmedia));
 
@@ -236,10 +178,9 @@ void calref_photon(MCHInfo *info,MCHData *data){
 	unsigned int blockCount = (info->sizeOfData + BLOCK_SIZE-1)/BLOCK_SIZE;
 	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (info->sizeOfData, info->colcount, info->maxmedia, gRawdata, gDetid, gWeight, gMua, info->unitmm, info->theta);
 
-	CUDA_CHECK_RETURN(cudaMemcpy(data->detid, gDetid, sizeof(float)*info->sizeOfData, cudaMemcpyDeviceToHost));
+	CUDA_CHECK_RETURN(cudaMemcpy(data->detid, gDetid, sizeof(int)*info->sizeOfData, cudaMemcpyDeviceToHost));
 	CUDA_CHECK_RETURN(cudaMemcpy(data->weight, gWeight, sizeof(float)*info->sizeOfData, cudaMemcpyDeviceToHost));
 
-	fprintf1DArray(data->weight, info->sizeOfData);
 
 	CUDA_CHECK_RETURN(cudaFree(gRawdata));
 	CUDA_CHECK_RETURN(cudaFree(gDetid));
@@ -248,14 +189,46 @@ void calref_photon(MCHInfo *info,MCHData *data){
 
 }
 
+void sortbykey(MCHInfo *info, MCHData *data){
+
+	//copy values from pointer to static array
+	int keys[info->sizeOfData];
+	arraymapping_1d<int>(data->detid, keys, info->sizeOfData);
+
+	float values[info->sizeOfData];
+	arraymapping_1d<float>(data->weight, values, info->sizeOfData);
+
+	char f3[] = "detid.txt";
+	fprintf1DArray(f3, data->detid, info->sizeOfData);
+
+	char f5[] = "keys.txt";
+	fprintf1DArray(f5, keys, info->sizeOfData);
+
+	/*char f4[] = "weight.txt";
+	fprintf1DArray(f4, data->weight, info->sizeOfData);*/
+
+	//call main function
+	const int N = info->sizeOfData;
+	thrust::sort_by_key(thrust::host, keys, keys + N, values);
+
+	//copy values from static array to pointer
+	arraymapping_1d<int >(keys, data->detid, info->sizeOfData);
+	arraymapping_1d<float>(values, data->weight, info->sizeOfData);
+
+	char f1[] = "detid_sorted.txt";
+	fprintf1DArray(f1, data->detid, info->sizeOfData);
+
+	/*char f2[] = "weight_sorted.txt";
+	fprintf1DArray(f2, data->weight, info->sizeOfData);*/
+}
 int main(void)
 {
 	MCHInfo info;
 	MCHData data;
 
 	initloadpara(&info,&data);
-	calref_photon(&info,&data);	// void calref_photon(MCHInfo *info, MCHData *data);//also partition rawdata into detid, weight arrays //__host__ calRefPerPhotonKernel
-	//sortbykey(&info,&data);		// void sortbykey(MCHInfo *info, MCHData *data); 	//__host__ void thrust::sort_by_key
+	calref_photon(&info,&data);
+	sortbykey(&info,&data);
 	//calref_det(&info,&data);		// void calref(MCHInfo *info, MCHData *data);		//__host__ thrust::pair<float*,float*> thrust::reduce_by_key
 	//printresult(&info,&data);		// void printresult(MCHInfo *info, MCHData *data);
 
