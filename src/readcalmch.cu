@@ -9,6 +9,7 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <numeric>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t
 using namespace std;
 
 typedef struct _MCHInfo {
+	int 	isprintinfo;
 	char	fname_mch[30];
 	char	fname_inp[30];
 	char	magicheader[4];
@@ -32,7 +34,7 @@ typedef struct _MCHInfo {
 	float 	unitmm, normalizer;
 	float 	na, n0, theta; 	// load from .inp
 	float 	*mua;			// load from .inp
-	unsigned int sizeOfRawData, sizeOfData, sizeOfResult;
+	unsigned sizeOfRawData, sizeOfData, sizeOfResult;
 }MCHInfo;
 
 typedef struct _MCHData {
@@ -43,53 +45,109 @@ typedef struct _MCHData {
 }MCHData;
 
 template <typename T>
-void arraymapping_1d(T *origin, T *copy, unsigned int size){
-	for (unsigned int i = 0; i < size; ++i)
+void arraymapping_1d(T *origin, T *copy, unsigned size){
+	for (unsigned i = 0; i < size; ++i)
 		copy[i] = origin[i];
 }
 
 template <typename T>
-void fprintf1DArray(char fname[], T *data, unsigned int size)
+void fprintf1DArray(char fname[], T *data, unsigned size)
 {
-	printf("Print to %s ...\n",fname);
 	ofstream myfile;
 
 	myfile.open(fname);
-	for (unsigned int i = 0; i < size; ++i)
-		myfile << "[" << i << "]\t" << data[i] << endl;
+	for (unsigned i = 0; i < size; ++i)
+		myfile << fixed << setprecision(16) << data[i] << endl;
 
 	myfile.close();
 }
 
-void initloadpara(MCHInfo *info, MCHData *data){
+void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 
 	FILE *fptr_mch, *fptr_inp;
+	//default
+	info->isprintinfo = 1;
+
+	//load from argv
+	int i = 0;
+	while(i < argc){
+		if(argv[i][0] == '-'){
+
+			switch(argv[i][1]){
+				case 'h':
+					printf("p[1|0]\tPrint all the details of input arguments.\n");
+					printf("n[float]\tRefraction index of outside medium.(must be entered).\n");
+					printf("a[float]\tNumerical aperature (must be entered).\n");
+					printf("f[string]\tFile name of .inp and .mch (must be entered).\n");
+					exit(0);
+				case 'p':
+					info->isprintinfo = atoi(argv[i+1]);
+					i++;
+					break;
+				case 'n':
+					info->n0 = atof(argv[i+1]);
+					i++;
+					break;
+				case 'a':
+					info->na = atof(argv[i+1]);
+					i++;
+					break;
+				case 'f':
+					char temp[30];
+					strcpy(temp,argv[i+1]);
+					sprintf(info->fname_inp,"%s.inp",temp);
+					sprintf(info->fname_mch,"%s.mch",temp);
+					i++;
+					break;
+				default:
+					printf("Did not assign from argv.\n Use '-h' to see the must options.\n");
+					i++;
+			}
+		}
+		i++;
+	}
 
 	// set constant
-	info->n0 = 1.457; 	printf("n0\t\t%f\n",info->n0);
-	info->na = 0.22; 	printf("na\t\t%f\n",info->na);
-	info->theta = asin(info->na/info->n0); printf("theta\t\t%f\n",info->theta);
+	info->theta = asin(info->na/info->n0);
+	if (info->isprintinfo){
+		printf("n0\t\t%f\n",info->n0);
+		printf("na\t\t%f\n",info->na);
+		printf("theta\t\t%f\n",info->theta);
+	}
 
 	// specify .mch fname
-	printf("Enter .mch file name:");
-	scanf("%s",&(info->fname_mch));
-	printf("Loading from %s ...\n",info->fname_mch);
+	if (info->isprintinfo) printf("Loading from %s ...\n",info->fname_mch);
 
 	// load from fptr_mch
 	fptr_mch = fopen(info->fname_mch,"rb");
 
-	fread(info->magicheader,sizeof(char),4,fptr_mch);				printf("version\t\t%c%c%c%c\n",info->magicheader[0],info->magicheader[1],info->magicheader[2],info->magicheader[3]);
-	fread(&(info->version),sizeof(unsigned int),1,fptr_mch);		printf("version\t\t%d\n",info->version);
-	fread(&(info->maxmedia),sizeof(unsigned int),1,fptr_mch);		printf("mexmedia\t%d\n",info->maxmedia);
-	fread(&(info->detnum),sizeof(unsigned int),1,fptr_mch);			printf("detnum\t\t%d\n",info->detnum);
-	fread(&(info->colcount),sizeof(unsigned int),1,fptr_mch);		printf("colcount\t%d\n",info->colcount);
-	fread(&(info->totalphoton),sizeof(unsigned int),1,fptr_mch);	printf("totalphoton\t%d\n",info->totalphoton);
-	fread(&(info->detected),sizeof(unsigned int),1,fptr_mch);		printf("detected\t%d\n",info->detected);
-	fread(&(info->savedphoton),sizeof(unsigned int),1,fptr_mch);	printf("savedphoton\t%d\n",info->savedphoton);
-	fread(&(info->unitmm),sizeof(float),1,fptr_mch);				printf("unitmm\t\t%f\n",info->unitmm);
-	fread(&(info->seedbyte),sizeof(unsigned int),1,fptr_mch);		printf("seedbyte\t%d\n",info->seedbyte);
-	fread(&(info->normalizer),sizeof(float),1,fptr_mch);			printf("normalizer\t%f\n",info->normalizer);
-	fread(info->junk,sizeof(unsigned int),5,fptr_mch);				printf("junk\t\t%d%d%d%d%d\n",info->junk[0],info->junk[1],info->junk[2],info->junk[3],info->junk[4]);
+	fread(info->magicheader,sizeof(char),4,fptr_mch);
+	fread(&(info->version),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->maxmedia),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->detnum),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->colcount),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->totalphoton),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->detected),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->savedphoton),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->unitmm),sizeof(float),1,fptr_mch);
+	fread(&(info->seedbyte),sizeof(unsigned int),1,fptr_mch);
+	fread(&(info->normalizer),sizeof(float),1,fptr_mch);
+	fread(info->junk,sizeof(unsigned int),5,fptr_mch);
+
+	if (info->isprintinfo){
+		printf("version\t\t%c%c%c%c\n",info->magicheader[0],info->magicheader[1],info->magicheader[2],info->magicheader[3]);
+		printf("version\t\t%d\n",info->version);
+		printf("mexmedia\t%d\n",info->maxmedia);
+		printf("detnum\t\t%d\n",info->detnum);
+		printf("colcount\t%d\n",info->colcount);
+		printf("totalphoton\t%d\n",info->totalphoton);
+		printf("detected\t%d\n",info->detected);
+		printf("savedphoton\t%d\n",info->savedphoton);
+		printf("unitmm\t\t%f\n",info->unitmm);
+		printf("seedbyte\t%d\n",info->seedbyte);
+		printf("normalizer\t%f\n",info->normalizer);
+		printf("junk\t\t%d%d%d%d%d\n",info->junk[0],info->junk[1],info->junk[2],info->junk[3],info->junk[4]);
+	}
 
 	//allocate memory
 	info->sizeOfData = info->savedphoton;
@@ -105,9 +163,7 @@ void initloadpara(MCHInfo *info, MCHData *data){
 
 
 	// specify .inp fname
-	printf("Enter .inp file name:");
-	scanf("%s",&(info->fname_inp));
-	printf("Loading from %s ...\n",info->fname_inp);
+	if (info->isprintinfo) printf("Loading from %s ...\n",info->fname_inp);
 
 	// load from fptr_inp
 	fptr_inp = fopen(info->fname_inp,"r");
@@ -115,15 +171,15 @@ void initloadpara(MCHInfo *info, MCHData *data){
 	for (int i = 0; i < 10; ++i)
 		fgets(junkc, 50, fptr_inp); //discard from line 1 to 10
 
-	unsigned int sizeOfMua = info->maxmedia;
+	unsigned sizeOfMua = info->maxmedia;
 	double junkf1, junkf2, junkf3, junkf4;
 	info->mua = (float*) malloc (sizeof(float)*sizeOfMua);
 	for(int i = 0; i < sizeOfMua; ++i)
 	{
-		printf("mua %d:",i);
+		if (info->isprintinfo) printf("mua %d:",i);
 		fscanf(fptr_inp,"%lf %lf %lf %lf",&(junkf1), &(junkf2), &(junkf3), &(junkf4));
 		info->mua[i] = (float)junkf3; //casting double into float, and stored in mua[i]
-		printf("\t%e\n",info->mua[i]);
+		if (info->isprintinfo) printf("\t%e\n",info->mua[i]);
 	}
 
 	// close
@@ -134,7 +190,7 @@ void initloadpara(MCHInfo *info, MCHData *data){
 /**
  * CUDA kernel that computes reflectance values for each photon
  */
-__global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, unsigned int maxmedia, float *rawdata, int *detid, float *weight, float *mua, float unitmm, float theta) {
+__global__ void calRefPerPhotonKernel(unsigned size, unsigned int colcount, unsigned int maxmedia, float *rawdata, int *detid, float *weight, float *mua, float unitmm, float theta) {
 
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x; //i.e. rowcount
 
@@ -144,7 +200,7 @@ __global__ void calRefPerPhotonKernel(unsigned int size, unsigned int colcount, 
 
 		float temp = 0.0;
 		if (acosf(abs(rawdata[(idx+1)*colcount-1])) <= theta){
-			for (unsigned int i = 0; i < maxmedia; ++i)
+			for (unsigned i = 0; i < maxmedia; ++i)
 				temp += (-1.0)*unitmm*mua[i]*rawdata[idx*colcount + (2+i)];
 			weight[idx] = __expf(temp);
 		}
@@ -222,6 +278,7 @@ void printresult(MCHInfo *info, MCHData *data){
 	// print result
 	char f1[] = "result.txt";
 	fprintf1DArray(f1, data->result, info->sizeOfResult);
+	if (info->isprintinfo) printf("Print to %s ...\n",f1);
 
 	// print result./totalphoton
 	double temp[info->sizeOfResult];
@@ -229,7 +286,7 @@ void printresult(MCHInfo *info, MCHData *data){
 		temp[i] = data->result[i]/info->totalphoton;
 	char f2[] = "result_dividedTotalPhoton.txt";
 	fprintf1DArray(f2, temp, info->sizeOfResult);
-
+	if (info->isprintinfo) printf("Print to %s ...\n",f2);
 }
 void clearmch(MCHInfo *info, MCHData *data){
 	if(info->mua){
@@ -254,17 +311,17 @@ void clearmch(MCHInfo *info, MCHData *data){
 	}
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
 	MCHInfo info;
 	MCHData data;
 
-	initloadpara(&info,&data);
-	calref_photon(&info,&data);
-	sortbykey(&info,&data);
-	calref_det(&info,&data);
-	printresult(&info,&data);
-	clearmch(&info,&data);
+	initloadpara(argc, argv, &info, &data);
+	calref_photon(&info, &data);
+	sortbykey(&info, &data);
+	calref_det(&info, &data);
+	printresult(&info, &data);
+	clearmch(&info, &data);
 
 	return 0;
 }
