@@ -26,8 +26,7 @@ using namespace std;
 
 typedef struct _MCHInfo {
 	int 	isprintinfo;
-	char	fname_mch[30];
-	char	fname_inp[30];
+	char	fname[30];
 	char	magicheader[4];
 	unsigned int	version, maxmedia, detnum, colcount, totalphoton, detected, savedphoton, seedbyte;
 	unsigned int 	junk[5];
@@ -93,10 +92,7 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 					i++;
 					break;
 				case 'f':
-					char temp[30];
-					strcpy(temp,argv[i+1]);
-					sprintf(info->fname_inp,"%s.inp",temp);
-					sprintf(info->fname_mch,"%s.mch",temp);
+					strcpy(info->fname,argv[i+1]);
 					i++;
 					break;
 				default:
@@ -116,10 +112,12 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 	}
 
 	// specify .mch fname
-	if (info->isprintinfo) printf("Loading from %s ...\n",info->fname_mch);
+	char fname_mch[30];
+	sprintf(fname_mch,"%s.mch",info->fname);
+	if (info->isprintinfo) printf("Loading from %s ...\n",fname_mch);
 
 	// load from fptr_mch
-	fptr_mch = fopen(info->fname_mch,"rb");
+	fptr_mch = fopen(fname_mch,"rb");
 
 	fread(info->magicheader,sizeof(char),4,fptr_mch);
 	fread(&(info->version),sizeof(unsigned int),1,fptr_mch);
@@ -163,10 +161,12 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 
 
 	// specify .inp fname
-	if (info->isprintinfo) printf("Loading from %s ...\n",info->fname_inp);
+	char fname_inp[30];
+	sprintf(fname_inp,"%s.inp",info->fname);
+	if (info->isprintinfo) printf("Loading from %s ...\n",fname_inp);
 
 	// load from fptr_inp
-	fptr_inp = fopen(info->fname_inp,"r");
+	fptr_inp = fopen(fname_inp,"r");
 	char junkc[50];
 	for (int i = 0; i < 10; ++i)
 		fgets(junkc, 50, fptr_inp); //discard from line 1 to 10
@@ -275,18 +275,15 @@ void calref_det(MCHInfo *info, MCHData *data){
 }
 void printresult(MCHInfo *info, MCHData *data){
 
-	// print result
-	char f1[] = "result.txt";
-	fprintf1DArray(f1, data->result, info->sizeOfResult);
-	if (info->isprintinfo) printf("Print to %s ...\n",f1);
-
 	// print result./totalphoton
 	double temp[info->sizeOfResult];
 	for (unsigned i = 0; i < info->sizeOfResult; ++i)
 		temp[i] = data->result[i]/info->totalphoton;
-	char f2[] = "result_dividedTotalPhoton.txt";
-	fprintf1DArray(f2, temp, info->sizeOfResult);
-	if (info->isprintinfo) printf("Print to %s ...\n",f2);
+
+	char fname[30];
+	sprintf(fname,"%s.txt",info->fname);
+	fprintf1DArray(fname, temp, info->sizeOfResult);
+	if (info->isprintinfo) printf("Print to %s ...\n",fname);
 }
 void clearmch(MCHInfo *info, MCHData *data){
 	if(info->mua){
