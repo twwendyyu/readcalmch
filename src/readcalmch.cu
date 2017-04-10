@@ -67,6 +67,8 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 	FILE *fptr_mch, *fptr_inp;
 	//default
 	info->isprintinfo = 1;
+	info->n0 = 1.0;
+	info->na = 1.0;
 
 	//load from argv
 	int i = 0;
