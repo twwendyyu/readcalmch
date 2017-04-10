@@ -28,6 +28,7 @@ using namespace std;
 typedef struct _MCHInfo {
 	int 	isprintinfo;
 	char	fname[30];
+	char 	foutname[30];
 	char	magicheader[4];
 	unsigned int	version, maxmedia, detnum, colcount, totalphoton, detected, savedphoton, seedbyte;
 	unsigned int 	junk[5];
@@ -55,7 +56,7 @@ void fprintf1DArray(char fname[], T *data, unsigned size)
 {
 	ofstream myfile;
 
-	myfile.open(fname);
+	myfile.open(fname, ios::out | ios::app);
 	for (unsigned i = 0; i < size; ++i)
 		myfile << fixed << setprecision(16) << data[i] << endl;
 
@@ -65,7 +66,10 @@ void fprintf1DArray(char fname[], T *data, unsigned size)
 void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 
 	FILE *fptr_mch, *fptr_inp;
+
 	//default
+	memset(info->fname,'\0',30);
+	memset(info->foutname,'\0',30);
 	info->isprintinfo = 1;
 	info->n0 = 1.0;
 	info->na = 1.0;
@@ -77,10 +81,12 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 
 			switch(argv[i][1]){
 				case 'h':
-					printf("p[1|0]\tPrint all the details of input arguments.\n");
-					printf("n[float]\tRefraction index of outside medium.(must be entered).\n");
-					printf("a[float]\tNumerical aperature (must be entered).\n");
-					printf("f[string]\tFile name of .inp and .mch (must be entered).\n");
+					printf("readcalmch\n");
+					printf("-f [string]\tFile name of .inp and .mch (must be entered).\n");
+					printf("-o [f|string]\tThe name of the output file is default to be the same as input files.\n");
+					printf("-p [1|0]\tPrint all the details of input arguments.\n");
+					printf("-n [1.0|float]\tRefraction index of outside medium.\n");
+					printf("-a [1.0|float]\tNumerical aperature.\n");
 					exit(0);
 				case 'p':
 					info->isprintinfo = atoi(argv[i+1]);
@@ -98,12 +104,22 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 					strcpy(info->fname,argv[i+1]);
 					i++;
 					break;
-				default:
-					printf("Did not assign from argv.\n Use '-h' to see the must options.\n");
+				case 'o':
+					strcpy(info->foutname,argv[i+1]);
 					i++;
+					break;
+				default:
+					printf("This is an unknown option. Use '-h' to see the available options.\n");
+					exit(1);
 			}
 		}
 		i++;
+	}
+
+	// check input file is specified or not
+	if (info->fname[0] == '\0'){
+		printf("The name of .inp and .mch files should be specified by '-f' option.\n");
+		exit(1);
 	}
 
 	// set constant
@@ -258,7 +274,11 @@ void printresult(MCHInfo *info, MCHData *data){
 		temp[i] = data->result[i]/info->totalphoton;
 
 	char fname[30];
-	sprintf(fname,"%s.txt",info->fname);
+	if (info->foutname[0] == '\0')
+		sprintf(fname,"%s.txt",info->fname);
+	else{
+		sprintf(fname,"%s.txt",info->foutname);
+	}
 	fprintf1DArray(fname, temp, data->sizeOfResult);
 	if (info->isprintinfo) printf("Print to %s ...\n",fname);
 
