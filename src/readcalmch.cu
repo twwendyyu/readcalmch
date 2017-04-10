@@ -21,6 +21,7 @@
 static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t);
 #define CUDA_CHECK_RETURN(value) CheckCudaErrorAux(__FILE__,__LINE__, #value, value)
 #define BLOCK_SIZE 512
+#define MAX_WORKLOAD 250000
 
 using namespace std;
 
@@ -33,10 +34,10 @@ typedef struct _MCHInfo {
 	float 	unitmm, normalizer;
 	float 	na, n0, theta; 	// load from .inp
 	float 	*mua;			// load from .inp
-	unsigned sizeOfRawData, sizeOfData, sizeOfResult;
 }MCHInfo;
 
 typedef struct _MCHData {
+	unsigned sizeOfRawData, sizeOfData, sizeOfResult;
 	float 	*rawdata;		//array length: sizeOfRawData
 	int		*detid;			//array length:	sizeOfData
 	float 	*weight;		//array length: sizeOfData
@@ -148,16 +149,16 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 	}
 
 	//allocate memory
-	info->sizeOfData = info->savedphoton;
-	data->detid = (int*) malloc (sizeof(int)*info->sizeOfData);
-	data->weight = (float*) malloc (sizeof(float)*info->sizeOfData);
+	data->sizeOfData = info->savedphoton;
+	data->detid = (int*) malloc (sizeof(int)*data->sizeOfData);
+	data->weight = (float*) malloc (sizeof(float)*data->sizeOfData);
 
-	info->sizeOfResult = info->detnum;
-	data->result = (float*) malloc (sizeof(float)*info->sizeOfResult);
+	data->sizeOfResult = info->detnum;
+	data->result = (float*) malloc (sizeof(float)*data->sizeOfResult);
 
-	info->sizeOfRawData = info->savedphoton*info->colcount;
-	data->rawdata = (float*) malloc (sizeof(float)*info->sizeOfRawData);
-	fread(data->rawdata ,sizeof(float), info->sizeOfRawData,fptr_mch); /* did not scaled back to 1 mm yet */
+	data->sizeOfRawData = info->savedphoton*info->colcount;
+	data->rawdata = (float*) malloc (sizeof(float)*data->sizeOfRawData);
+	fread(data->rawdata ,sizeof(float), data->sizeOfRawData,fptr_mch); /* did not scaled back to 1 mm yet */
 
 
 	// specify .inp fname
@@ -211,19 +212,19 @@ void calref_photon(MCHInfo *info,MCHData *data){
 	float *gRawdata, *gWeight, *gMua;
 	int *gDetid;
 
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gRawdata, sizeof(float)*info->sizeOfRawData));
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(int)*info->sizeOfData));
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*info->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gRawdata, sizeof(float)*data->sizeOfRawData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(int)*data->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*data->sizeOfData));
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gMua, sizeof(float)*info->maxmedia));
 
-	CUDA_CHECK_RETURN(cudaMemcpy(gRawdata, data->rawdata, sizeof(float)*info->sizeOfRawData, cudaMemcpyHostToDevice));
+	CUDA_CHECK_RETURN(cudaMemcpy(gRawdata, data->rawdata, sizeof(float)*data->sizeOfRawData, cudaMemcpyHostToDevice));
 	CUDA_CHECK_RETURN(cudaMemcpy(gMua, info->mua, sizeof(float)*info->maxmedia, cudaMemcpyHostToDevice));
 
-	unsigned int blockCount = (info->sizeOfData + BLOCK_SIZE-1)/BLOCK_SIZE;
-	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (info->sizeOfData, info->colcount, info->maxmedia, gRawdata, gDetid, gWeight, gMua, info->unitmm, info->theta);
+	unsigned int blockCount = (data->sizeOfData + BLOCK_SIZE-1)/BLOCK_SIZE;
+	calRefPerPhotonKernel<<<blockCount, BLOCK_SIZE>>> (data->sizeOfData, info->colcount, info->maxmedia, gRawdata, gDetid, gWeight, gMua, info->unitmm, info->theta);
 
-	CUDA_CHECK_RETURN(cudaMemcpy(data->detid, gDetid, sizeof(int)*info->sizeOfData, cudaMemcpyDeviceToHost));
-	CUDA_CHECK_RETURN(cudaMemcpy(data->weight, gWeight, sizeof(float)*info->sizeOfData, cudaMemcpyDeviceToHost));
+	CUDA_CHECK_RETURN(cudaMemcpy(data->detid, gDetid, sizeof(int)*data->sizeOfData, cudaMemcpyDeviceToHost));
+	CUDA_CHECK_RETURN(cudaMemcpy(data->weight, gWeight, sizeof(float)*data->sizeOfData, cudaMemcpyDeviceToHost));
 
 
 	CUDA_CHECK_RETURN(cudaFree(gRawdata));
@@ -236,53 +237,53 @@ void calref_photon(MCHInfo *info,MCHData *data){
 void sortbykey(MCHInfo *info, MCHData *data){
 
 	//copy values from pointer to static array
-	int keys[info->sizeOfData];
-	arraymapping_1d<int>(data->detid, keys, info->sizeOfData);
+	int keys[data->sizeOfData];
+	arraymapping_1d<int>(data->detid, keys, data->sizeOfData);
 
-	float values[info->sizeOfData];
-	arraymapping_1d<float>(data->weight, values, info->sizeOfData);
+	float values[data->sizeOfData];
+	arraymapping_1d<float>(data->weight, values, data->sizeOfData);
 
 	//call main function
-	const int N = info->sizeOfData;
+	const int N = data->sizeOfData;
 	thrust::sort_by_key(thrust::host, keys, keys + N, values);
 
 	//copy values from static array to pointer
-	arraymapping_1d<int >(keys, data->detid, info->sizeOfData);
-	arraymapping_1d<float>(values, data->weight, info->sizeOfData);
+	arraymapping_1d<int >(keys, data->detid, data->sizeOfData);
+	arraymapping_1d<float>(values, data->weight, data->sizeOfData);
 
 
 }
 void calref_det(MCHInfo *info, MCHData *data){
 
 	//copy values from pointer to static array
-	int keysIn[info->sizeOfData];
-	arraymapping_1d<int>(data->detid, keysIn, info->sizeOfData);
+	int keysIn[data->sizeOfData];
+	arraymapping_1d<int>(data->detid, keysIn, data->sizeOfData);
 
-	float valuesIn[info->sizeOfData];
-	arraymapping_1d<float>(data->weight, valuesIn, info->sizeOfData);
+	float valuesIn[data->sizeOfData];
+	arraymapping_1d<float>(data->weight, valuesIn, data->sizeOfData);
 
-	int keysOut[info->sizeOfResult];
+	int keysOut[data->sizeOfResult];
 
-	float valuesOut[info->sizeOfResult];
+	float valuesOut[data->sizeOfResult];
 
 	//call main function
-	const int N = info->sizeOfData;
+	const int N = data->sizeOfData;
 	thrust::reduce_by_key(thrust::host, keysIn, keysIn + N, valuesIn, keysOut, valuesOut);
 
 	//copy values from static array to pointer
-	arraymapping_1d<float>(valuesOut, data->result, info->sizeOfResult);
+	arraymapping_1d<float>(valuesOut, data->result, data->sizeOfResult);
 
 }
 void printresult(MCHInfo *info, MCHData *data){
 
 	// print result./totalphoton
-	double temp[info->sizeOfResult];
-	for (unsigned i = 0; i < info->sizeOfResult; ++i)
+	double temp[data->sizeOfResult];
+	for (unsigned i = 0; i < data->sizeOfResult; ++i)
 		temp[i] = data->result[i]/info->totalphoton;
 
 	char fname[30];
 	sprintf(fname,"%s.txt",info->fname);
-	fprintf1DArray(fname, temp, info->sizeOfResult);
+	fprintf1DArray(fname, temp, data->sizeOfResult);
 	if (info->isprintinfo) printf("Print to %s ...\n",fname);
 }
 void clearmch(MCHInfo *info, MCHData *data){
@@ -308,15 +309,89 @@ void clearmch(MCHInfo *info, MCHData *data){
 	}
 }
 
+void segmentdata(int batchid, int batchnum, MCHData *data_batch, MCHInfo *info, MCHData *data){
+	//copy segmented data from data.rawdata to data_batch.rawdata, and change the corresponding info
+
+	int rownum;
+
+	if (batchid == batchnum-1)
+		rownum = info->savedphoton - (batchnum-1)*MAX_WORKLOAD;
+	else
+		rownum = MAX_WORKLOAD;
+
+	//rawdata
+	data_batch->sizeOfRawData = rownum*info->colcount;
+	unsigned startid = (unsigned)batchid*MAX_WORKLOAD*info->colcount;
+	data_batch->rawdata = &(data->rawdata[startid]);
+
+	//data
+	data_batch->sizeOfData = rownum;
+	data_batch->detid = (int*) malloc (sizeof(int)*data_batch->sizeOfData);
+	data_batch->weight = (float*) malloc (sizeof(float)*data_batch->sizeOfData);
+
+	//result
+	data_batch->sizeOfResult = data->sizeOfResult;
+	data_batch->result = (float*) malloc (sizeof(float)*data_batch->sizeOfResult);
+
+}
+
+void gatherbatchdata(MCHData *data_batch, MCHData *data){
+	//add data_batch.result to data.result
+	for (int i = 0; i < data_batch->sizeOfResult; ++i)
+		data->result[i] += data_batch->result[i];
+
+}
+
+void clearbatch(MCHData *data){
+	/*if(data->rawdata){
+			free(data->rawdata);
+			data->rawdata = NULL;
+		}*/
+		if(data->detid){
+			free(data->detid);
+			data->detid = NULL;
+		}
+		if(data->weight){
+			free(data->weight);
+			data->weight = NULL;
+		}
+		if(data->result){
+			free(data->result);
+			data->result = NULL;
+		}
+}
+
 int main(int argc, char *argv[])
 {
 	MCHInfo info;
 	MCHData data;
 
 	initloadpara(argc, argv, &info, &data);
-	calref_photon(&info, &data);
-	sortbykey(&info, &data);
-	calref_det(&info, &data);
+
+	if(info.savedphoton > MAX_WORKLOAD){
+
+		MCHData data_batch;//intialize in segmentdata
+
+		int batchnum = (info.savedphoton/MAX_WORKLOAD) +1;
+		int batchid = 0;
+
+		while (batchid < batchnum){
+
+			segmentdata(batchid,batchnum,&data_batch,&info,&data);
+			calref_photon(&info, &data_batch);
+			sortbykey(&info, &data_batch);
+			calref_det(&info, &data_batch);
+			gatherbatchdata(&data_batch,&data);
+			clearbatch(&data_batch);
+			batchid++;
+		}
+
+	}else{
+		calref_photon(&info, &data);
+		sortbykey(&info, &data);
+		calref_det(&info, &data);
+	}
+
 	printresult(&info, &data);
 	clearmch(&info, &data);
 
