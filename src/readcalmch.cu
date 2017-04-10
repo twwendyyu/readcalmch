@@ -238,42 +238,16 @@ void calref_photon(MCHInfo *info,MCHData *data){
 
 void sortbykey(MCHInfo *info, MCHData *data){
 
-	//copy values from pointer to static array
-	int keys[data->sizeOfData];
-	arraymapping_1d<int>(data->detid, keys, data->sizeOfData);
-
-	float values[data->sizeOfData];
-	arraymapping_1d<float>(data->weight, values, data->sizeOfData);
-
-	//call main function
 	const int N = data->sizeOfData;
-	thrust::sort_by_key(thrust::host, keys, keys + N, values);
-
-	//copy values from static array to pointer
-	arraymapping_1d<int >(keys, data->detid, data->sizeOfData);
-	arraymapping_1d<float>(values, data->weight, data->sizeOfData);
-
+	thrust::sort_by_key(thrust::host, data->detid, data->detid + N, data->weight);
 
 }
 void calref_det(MCHInfo *info, MCHData *data){
 
-	//copy values from pointer to static array
-	int keysIn[data->sizeOfData];
-	arraymapping_1d<int>(data->detid, keysIn, data->sizeOfData);
-
-	float valuesIn[data->sizeOfData];
-	arraymapping_1d<float>(data->weight, valuesIn, data->sizeOfData);
-
 	int keysOut[data->sizeOfResult];
 
-	float valuesOut[data->sizeOfResult];
-
-	//call main function
 	const int N = data->sizeOfData;
-	thrust::reduce_by_key(thrust::host, keysIn, keysIn + N, valuesIn, keysOut, valuesOut);
-
-	//copy values from static array to pointer
-	arraymapping_1d<float>(valuesOut, data->result, data->sizeOfResult);
+	thrust::reduce_by_key(thrust::host, data->detid, data->detid + N, data->weight, keysOut, data->result);
 
 }
 void printresult(MCHInfo *info, MCHData *data){
@@ -287,6 +261,7 @@ void printresult(MCHInfo *info, MCHData *data){
 	sprintf(fname,"%s.txt",info->fname);
 	fprintf1DArray(fname, temp, data->sizeOfResult);
 	if (info->isprintinfo) printf("Print to %s ...\n",fname);
+
 }
 void clearmch(MCHInfo *info, MCHData *data){
 	if(info->mua){
