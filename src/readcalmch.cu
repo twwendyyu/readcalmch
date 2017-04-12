@@ -26,7 +26,7 @@ static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t
 using namespace std;
 
 typedef struct _MCHInfo {
-	int 	isprintinfo;
+	int 	isprintinfo, digit;
 	char	fname[30];
 	char 	foutname[30];
 	char	magicheader[4];
@@ -52,13 +52,13 @@ void arraymapping_1d(T *origin, T *copy, unsigned size){
 }
 
 template <typename T>
-void fprintf1DArray(char fname[], T *data, unsigned size)
+void fprintf1DArray(char fname[], T *data, unsigned size, int digit)
 {
 	ofstream myfile;
 
 	myfile.open(fname, ios::out | ios::app);
 	for (unsigned i = 0; i < size; ++i)
-		myfile << fixed << setprecision(16) << data[i] << endl;
+		myfile << fixed << setprecision(digit) << data[i] << endl;
 
 	myfile.close();
 }
@@ -71,6 +71,7 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 	memset(info->fname,'\0',30);
 	memset(info->foutname,'\0',30);
 	info->isprintinfo = 1;
+	info->digit = 10;
 	info->n0 = 1.0;
 	info->na = 1.0;
 
@@ -85,11 +86,16 @@ void initloadpara(int argc, char* argv[], MCHInfo *info, MCHData *data){
 					printf("-f [string]\tFile name of .inp and .mch (must be entered).\n");
 					printf("-o [f|string]\tThe name of the output file is default to be the same as input files.\n");
 					printf("-p [1|0]\tPrint all the details of input arguments.\n");
+					printf("-d [10|int]\tNumber of digits of output format.\n");
 					printf("-n [1.0|float]\tRefraction index of outside medium.\n");
 					printf("-a [1.0|float]\tNumerical aperature.\n");
 					exit(0);
 				case 'p':
 					info->isprintinfo = atoi(argv[i+1]);
+					i++;
+					break;
+				case 'd':
+					info->digit = atoi(argv[i+1]);
 					i++;
 					break;
 				case 'n':
@@ -279,7 +285,7 @@ void printresult(MCHInfo *info, MCHData *data){
 	else{
 		sprintf(fname,"%s.txt",info->foutname);
 	}
-	fprintf1DArray(fname, temp, data->sizeOfResult);
+	fprintf1DArray(fname, temp, data->sizeOfResult, info->digit);
 	if (info->isprintinfo) printf("Print to %s ...\n",fname);
 
 }
