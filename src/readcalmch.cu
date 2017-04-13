@@ -37,7 +37,7 @@ typedef struct _MCHInfo {
 	float 	*mua;			// load from .inp
 }MCHInfo;
 
-typedef struct _MCHData {
+typedef struct _MCHData {	//A suffix is unnecessary in C++. Any floating point value which lacks the 'f' suffix will be typed to the compiler type double by default.
 	unsigned sizeOfRawData, sizeOfData, sizeOfResult;
 	float 	*rawdata;		//array length: sizeOfRawData
 	int		*detid;			//array length:	sizeOfData
@@ -45,11 +45,11 @@ typedef struct _MCHData {
 	float 	*result;		//array length: sizeOfResult
 }MCHData;
 
-template <typename T>
+/*template <typename T>
 void arraymapping_1d(T *origin, T *copy, unsigned size){
 	for (unsigned i = 0; i < size; ++i)
 		copy[i] = origin[i];
-}
+}*/
 
 template <typename T>
 void fprintf1DArray(char fname[], T *data, unsigned size, int digit)
@@ -220,25 +220,26 @@ __global__ void calRefPerPhotonKernel(unsigned size, unsigned int colcount, unsi
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x; //i.e. rowcount
 
 	if (idx < size){
-		detid[idx] = (int)rawdata[idx*colcount];
+		detid[idx] = (int)rawdata[idx*colcount];//size, colcount, maxmedia, theta, rawdata is read-only
 		weight[idx] = 0.0;
 
-		float temp = 0.0;
+		float temp = 0.0;// change to double (Is casting float to double on cuda kernel free?)
 		if (acosf(abs(rawdata[(idx+1)*colcount-1])) <= theta){
 			for (unsigned i = 0; i < maxmedia; ++i)
-				temp += (-1.0)*unitmm*mua[i]*rawdata[idx*colcount + (2+i)];
-			weight[idx] = __expf(temp);
+				temp += (-1.0)*unitmm*mua[i]*rawdata[idx*colcount + (2+i)];// calculate -1.0*unitmm*mua[i] on cpu, then set them as a double precision constant array?(read-only)
+			weight[idx] = __expf(temp);	// may occur round-off errors, try to do exp() on cpu? or using double to store
 		}
 	}
 }
 void calref_photon(MCHInfo *info,MCHData *data){
-
+	// declare cuda constant memory in file scope: __constant__ GPUInfo ginfo{unsigned int size,unsigned int colcount,unsigned int maxmedia,float theta}
+	// 											   __constant__ float	gnegunitmua[MAX_MEDIA],
 	float *gRawdata, *gWeight, *gMua;
 	int *gDetid;
-
+	// calculate and assign values of ginfo, gnegunitmua here
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gRawdata, sizeof(float)*data->sizeOfRawData));
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gDetid, sizeof(int)*data->sizeOfData));
-	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*data->sizeOfData));
+	CUDA_CHECK_RETURN(cudaMalloc((void **)&gWeight, sizeof(float)*data->sizeOfData));//using double
 	CUDA_CHECK_RETURN(cudaMalloc((void **)&gMua, sizeof(float)*info->maxmedia));
 
 	CUDA_CHECK_RETURN(cudaMemcpy(gRawdata, data->rawdata, sizeof(float)*data->sizeOfRawData, cudaMemcpyHostToDevice));
